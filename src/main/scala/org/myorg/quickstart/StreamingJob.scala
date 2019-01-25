@@ -37,6 +37,7 @@ object StreamingJob {
     // set up the streaming execution environment
     val env = StreamExecutionEnvironment.getExecutionEnvironment
 
+    val stream = env.readTextFile("./data/access_log_Jul95")
     /*
      * Here, you can start creating your execution plan for Flink.
      *
@@ -58,6 +59,9 @@ object StreamingJob {
      */
 
     // execute program
-    //env.execute("Flink Streaming Scala API Skeleton")
+    stream.print()
+
+
+    env.execute("Flink Streaming Scala API Skeleton")
   }
 }

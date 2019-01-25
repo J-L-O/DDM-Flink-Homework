@@ -1,4 +1,8 @@
-target/
-.idea/
+target/*
+.idea/*
+data/*
+
+!data/NASA_access_log_Aug95.gz
+!data/NASA_access_log_Jul95.gz
 
 DDM-Flink-Homework.iml
