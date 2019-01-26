@@ -22,11 +22,11 @@ under the License.
 	<modelVersion>4.0.0</modelVersion>
 
 	<groupId>org.myorg.quickstart</groupId>
-	<artifactId>quickstart</artifactId>
+	<artifactId>DDM-Flink-Homework</artifactId>
 	<version>0.1</version>
 	<packaging>jar</packaging>
 
-	<name>Flink Quickstart Job</name>
+	<name>DDM-Flink-Homework</name>
 	<url>http://www.myorganization.org</url>
 
 	<repositories>
