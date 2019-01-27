@@ -18,12 +18,16 @@
 
 package org.myorg.quickstart
 
-import org.apache.flink.api.common.functions.RichFilterFunction
+import org.apache.flink.api.common.functions.{AggregateFunction, RichFilterFunction}
 import org.apache.flink.api.common.state.{ValueState, ValueStateDescriptor}
 import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.datastream.DataStreamUtils
 import org.apache.flink.streaming.api.functions.ProcessFunction
+import org.apache.flink.streaming.api.scala.function.ProcessAllWindowFunction
 import org.apache.flink.streaming.api.scala._
+import org.apache.flink.streaming.api.windowing.assigners.SlidingEventTimeWindows
+import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.streaming.api.windowing.windows.TimeWindow
 import org.apache.flink.util.Collector
 
 import scala.collection.JavaConverters.asScalaIteratorConverter
@@ -83,23 +87,41 @@ object StreamingJob {
      *
      */
 
+    val format = new java.text.SimpleDateFormat("dd/MMM/yyyy:HH:mm:ss")
+
     def split_line(line: String): Request = {
       val request_pattern: Regex = """(.*) - - \[(.*) -0400\] "GET (.*) HTTP/1.0" ([0-9]{3}) (.*)""".r
 
       line match {
-        case request_pattern(host, timestamp, resource, reply_code, reply_bytes) => Request(host, timestamp, resource, reply_code, reply_bytes)
-        case _ => Request("", "", "", "", "")
+        case request_pattern(host, timestamp, resource, reply_code, reply_bytes) => Request(host, format.parse(timestamp).getTime, resource, reply_code, reply_bytes)
+        case _ => Request("", 0, "", "", "")
       }
     }
 
     // execute program
 
-    val format = new java.text.SimpleDateFormat("dd/MMM/yyyy:HH:m:ss")
-
     val splitted = stream
       .map(s => split_line(s))
       .filter(s => s.host != "")
-      .assignAscendingTimestamps(s => format.parse(s.timestamp).getTime)
+      .assignAscendingTimestamps(s => s.timestamp)
+
+    val response_size = splitted
+      .filter(s => s.reply_bytes.forall(_.isDigit))
+      .map(s => ("90th percentile response size within last 24 hours", s.reply_bytes.toInt))
+      .windowAll(SlidingEventTimeWindows.of(Time.days(1), Time.hours(1)))
+      .process(new PercentileWindowFunction)
+
+    val error_percentage = splitted
+      .filter(s => s.reply_code.forall(_.isDigit))
+      .map(s => s.reply_code)
+      .windowAll(SlidingEventTimeWindows.of(Time.days(1), Time.hours(1)))
+      .aggregate(new CountErrorsAggregate)
+
+    val request_per_hour = splitted
+      .map(s => ("Number of requests within last 24 hours", 1))
+      .windowAll(SlidingEventTimeWindows.of(Time.days(1), Time.hours(1)))
+      .sum(1)
+      .map(s => Result(s._1, s._2.toString))
 
     val resources = splitted
       .map(s => (s.resource, 1))
@@ -122,7 +144,7 @@ object StreamingJob {
     val outputTag = OutputTag[Result]("side-output")
 
     val output = resources
-      .union(clients)
+      .union(clients, request_per_hour, response_size, error_percentage)
       .keyBy(s => s.metric)
       .filter(new FilterNewFunction)
       .process(new ProcessFunction[Result, Result] {
@@ -157,7 +179,7 @@ object StreamingJob {
     println("")
   }
 
-  case class Request(host: String, timestamp: String, resource: String, reply_code: String, reply_bytes: String)
+  case class Request(host: String, timestamp: Long, resource: String, reply_code: String, reply_bytes: String)
   case class Result(metric: String, value: String)
 
   class FilterNewFunction extends RichFilterFunction[Result] {
@@ -175,6 +197,34 @@ object StreamingJob {
       else{
         false
       }
+    }
+  }
+
+  class CountErrorsAggregate extends AggregateFunction[String, (Int, Int), Result] {
+    override def createAccumulator(): (Int, Int) = (0, 0)
+
+    override def add(value: String, accumulator: (Int, Int)): (Int, Int) = {
+      if (value.toInt >= 400){
+        (accumulator._1 + 1, accumulator._2 + 1)
+      }
+      else {
+        (accumulator._1, accumulator._2 + 1)
+      }
+    }
+
+    override def getResult(accumulator: (Int, Int)): Result = Result("Errors per 1000 requests within last 24 hours", (accumulator._1 * 1000 / accumulator._2).toString)
+
+    override def merge(a: (Int, Int), b: (Int, Int)): (Int, Int) =
+      (a._1 + b._1, a._2 + b._2)
+  }
+
+  class PercentileWindowFunction extends ProcessAllWindowFunction[(String, Int), Result, TimeWindow] {
+
+    override def process(context: Context, elements: Iterable[(String, Int)], out: Collector[Result]): Unit = {
+      val sorted = elements.toArray.sortBy(s => s._2)
+      val index = (sorted.length * 0.9).toInt
+
+      out.collect(Result(sorted(index)._1, sorted(index)._2.toString))
     }
   }
 }
