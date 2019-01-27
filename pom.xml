@@ -141,6 +141,10 @@ under the License.
 								<transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
 									<mainClass>org.myorg.quickstart.StreamingJob</mainClass>
 								</transformer>
+								<!-- append default configs -->
+								<transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+									<resource>reference.conf</resource>
+								</transformer>
 							</transformers>
 						</configuration>
 					</execution>
